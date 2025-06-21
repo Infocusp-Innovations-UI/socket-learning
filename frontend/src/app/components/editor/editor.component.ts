@@ -16,7 +16,7 @@ import {
   foldKeymap,
   syntaxHighlighting
 } from '@codemirror/language';
-import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, CompletionContext } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
 import { yCollab } from 'y-codemirror.next'
 
@@ -32,15 +32,29 @@ export class EditorComponent implements AfterViewInit {
   private ytext: Y.Text;
   private editorView?: EditorView;
   selectedLanguage = 'javascript';
+  userInfo: Record<string, any> | null = null;
+  otherOnlineUsers: Record<string, any>[] = [];
+  showOnlineUsersList = false;
 
   constructor(private wsService: WebsocketService) {
     this.ytext = this.wsService.getDoc().getText('collaborative-editor');
+    this.userInfo = this.wsService.getProvider().awareness.getLocalState()?.['user'];
+    this.wsService.getProvider().awareness.on('change', () => {
+      const states = [...this.wsService.getProvider().awareness.getStates().values()];
+      this.otherOnlineUsers = states
+        .map(state => state['user'])
+        .filter(user => !!user && user['name'] !== this.userInfo?.['name']);
+    });
   }
 
   ngAfterViewInit() {
     if (this.editorContainer?.nativeElement) {
       this.initializeEditor();
     }
+  }
+
+  toggleOnlineUsersList() {
+    this.showOnlineUsersList = !this.showOnlineUsersList;
   }
 
   private initializeEditor() {
@@ -74,6 +88,10 @@ export class EditorComponent implements AfterViewInit {
         yCollab(this.ytext, this.wsService.getProvider().awareness),
         EditorView.theme({
           "&": { height: "100%" },
+          ".cm-content": {
+            fontSize: "20px",
+            paddingTop: "16px"
+          },
           ".cm-scroller": {
             fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
             fontSize: "14px",
@@ -91,45 +109,12 @@ export class EditorComponent implements AfterViewInit {
           ...lintKeymap,
           indentWithTab
         ]),
-        EditorView.updateListener.of(update => {
-          if (update.docChanged) {
-            const content = update.state.doc.toString();
-            if (content !== this.ytext.toString()) {
-              const prevContent = this.ytext.toString();
-              let start = 0;
-              while (start < Math.min(prevContent.length, content.length) &&
-                     prevContent[start] === content[start]) {
-                start++;
-              }
-              let deleteCount = prevContent.length - start;
-              let insertText = content.slice(start);
-              this.ytext.delete(start, deleteCount);
-              if (insertText) this.ytext.insert(start, insertText);
-            }
-          }
-        })
       ]
     });
 
     this.editorView = new EditorView({
       state,
       parent: this.editorContainer.nativeElement
-    });
-
-    this.ytext.observe(event => {
-      const content = this.ytext.toString();
-      if (content !== this.editorView?.state.doc.toString()) {
-        const cursorPos = this.editorView?.state.selection.main.head || 0;
-
-        this.editorView?.dispatch({
-          changes: {
-            from: 0,
-            to: this.editorView.state.doc.length,
-            insert: content
-          },
-          selection: { anchor: cursorPos, head: cursorPos }
-        });
-      }
     });
   }
 
